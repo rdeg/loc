@@ -1,24 +1,24 @@
 # loc
 
 Package loc converts an NMEA-0183 stream into compiled fixes.
-At the end of each NMEA cycle, a new fix is compiled and a LocInfo structure is delivered on a channel. This channel is created on user's
-behalf when the Init function is called.
+At the end of each NMEA cycle, a new fix is compiled and a LocInfo structure is delivered on a channel. This channel is created on user's behalf when the Init function is called.
 
 The LocInfo structure gives information about the quality of the fix (navigation mode, DOPs, etc.), time, actual location (latitude,
 longitude, elevation), speed, heading as well as the characteristics of the satellites in view and used for the solution.
 
-Example usage
+## Example usage
 
-A typical usage would look like the following code.
+A typical usage would look like the following code:
 
 	package main
+	
 	import (
 		"io"
 		"log"
 		"os"
-		
 		"github.com/rdeg/loc"
 	)
+	
 	func main() {
 		// Start a go routine to handle GNSS fixes from the loc package.
 		done := make(chan struct {})	// channel used to terminate locHandler
@@ -52,6 +52,7 @@ A typical usage would look like the following code.
 			}
 		}
 	}
+	
 	// This goroutine handles the LocData sent by the loc package.
 	func locHandler(work chan *loc.LocInfo, done chan struct{}) {
 		for {
