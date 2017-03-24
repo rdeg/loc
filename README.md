@@ -1,5 +1,7 @@
 # loc
 
+`go get github.com/rdeg/loc`
+
 Package loc converts an NMEA-0183 stream into compiled fixes.
 At the end of each NMEA cycle, a new fix is compiled and a LocInfo structure is delivered on a channel. This channel is created on user's behalf when the Init function is called.
 
