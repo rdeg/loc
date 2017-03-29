@@ -3,6 +3,7 @@
 `go get github.com/rdeg/loc/ebsf`
 
 Package ebsf converts the compiled fixes given by the loc package into packed structures suitable for the wire.
+
 See github.com/rdeg/loc documentation for details.
 
 ## Example usage
