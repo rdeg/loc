@@ -4,7 +4,7 @@
 
 Package ebsf converts the compiled fixes given by the loc package into packed structures suitable for the wire.
 
-See github.com/rdeg/loc documentation for details.
+See https://godoc.org/github.com/rdeg/loc and https://godoc.org/github.com/rdeg/loc/ebsf documentation for details.
 
 ## Example usage
 
