@@ -66,3 +66,8 @@ A typical usage would look like the following code:
 			}
 		}
 	}
+	
+## Credits
+
+This package is based on work carried out at ACTIA PCs (http://www.actia-pcs.fr/en/)
+as part of the EBSF 2 project (http://ebsf2.eu/).
