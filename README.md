@@ -3,10 +3,13 @@
 `go get github.com/rdeg/loc`
 
 Package loc converts an NMEA-0183 stream into compiled fixes.
+
 At the end of each NMEA cycle, a new fix is compiled and a LocInfo structure is delivered on a channel. This channel is created on user's behalf when the Init function is called.
 
 The LocInfo structure gives information about the quality of the fix (navigation mode, DOPs, etc.), time, actual location (latitude,
 longitude, elevation), speed, heading as well as the characteristics of the satellites in view and used for the solution.
+
+See https://godoc.org/github.com/rdeg/loc and https://godoc.org/github.com/rdeg/loc/ebsf documentation for details.
 
 ## Example usage
 
