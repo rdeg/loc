@@ -16,7 +16,7 @@ import (
 )
 
 //\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
-// This goroutine handles the LocData sent by the loc package.
+// This goroutine handles the LocInfo sent by the loc package.
 //
 func locHandler(work chan *loc.LocInfo, done chan struct{}) {
 	for {
