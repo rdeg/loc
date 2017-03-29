@@ -12,6 +12,7 @@ import (
 	"unsafe"
 	
 	"github.com/rdeg/loc"
+	"github.com/rdeg/loc/ebsf"
 )
 
 //\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
@@ -21,7 +22,10 @@ func locHandler(work chan *loc.LocInfo, done chan struct{}) {
 	for {
 		select {
 		case li := <-work:
-//fmt.Printf("Fix: %v (%T)\n", li, li)
+			if li == nil {
+				continue
+			}
+//fmt.Printf("Fix: %v\n", li)
 			// Count in-use satellites
 			inuse := 0
 			for _, v := range li.Sats {
@@ -49,17 +53,49 @@ func locHandler(work chan *loc.LocInfo, done chan struct{}) {
 			}
 			
 			// Check the packed version of the LocInfo.
-			pli := loc.Pack(li)	// []byte
-			le := (*loc.EBSFLocInfo)(unsafe.Pointer(&pli[0]))	// *loc.EBSFLocInfo
-			if le.Level != li.Level || le.Quality != li.Quality || le.NavMode != li.NavMode || le.Smask != li.Smask ||
-			   le.Utc != li.Utc || le.Pdop != li.Pdop || le.Hdop != li.Hdop || le.Vdop != li.Vdop ||
-			   le.Lat != li.Lat || le.Lon != li.Lon || le.Elv != li.Elv || le.Speed != li.Speed ||
-			   le.Heading != li.Heading || le.Heading != li.Heading || le.Mv != li.Mv ||
-			   int(le.Satinfo.Inuse) != inuse || int(le.Satinfo.Inview) != len(li.Sats) {
-				panic(fmt.Sprintf("PACKED STRUCTURE DOES'NT MATCH!\n%s\n", hex.Dump(pli)))
+			pli := ebsf.Pack(li)	// []byte
+			eli := (*ebsf.EBSFLocInfo)(unsafe.Pointer(&pli[0]))
+			s := ""
+			switch {
+			case eli.Level != li.Level:
+				s = fmt.Sprintf("Level (%d != %d)", eli.Level, li.Level)
+			case eli.Quality != li.Quality:
+				s = fmt.Sprintf("Quality (%d != %d)", eli.Quality, li.Quality)
+			case eli.NavMode != li.NavMode:
+				s = fmt.Sprintf("NavMode (%d != %d)", eli.NavMode, li.NavMode)
+			case eli.Smask != li.Smask:
+				s = fmt.Sprintf("Smask (0x%02X != 0x%02X)", eli.Smask, li.Smask)
+			case eli.Utc != li.Utc:
+				s = fmt.Sprintf("Utc (%v != %v)", eli.Utc, li.Utc)
+			case eli.Pdop != li.Pdop:
+				s = fmt.Sprintf("Pdop (%f != %f)", eli.Pdop, li.Pdop)
+			case eli.Hdop != li.Hdop:
+				s = fmt.Sprintf("Hdop (%f != %f)", eli.Hdop, li.Hdop)
+			case eli.Vdop != li.Vdop:
+				s = fmt.Sprintf("Level (%f != %f)", eli.Vdop, li.Vdop)
+			case eli.Lat != li.Lat:
+				s = fmt.Sprintf("Lat (%f != %f)", eli.Lat, li.Lat)
+			case eli.Lon != li.Lon:
+				s = fmt.Sprintf("Lon (%f != %f)", eli.Lon, li.Lon)
+			case eli.Elv != li.Elv:
+				s = fmt.Sprintf("Elv (%f != %f)", eli.Elv, li.Elv)
+			case eli.Speed != li.Speed:
+				s = fmt.Sprintf("Speed (%f != %f)", eli.Speed, li.Speed)
+			case eli.Heading != li.Heading:
+				s = fmt.Sprintf("Heading (%f != %f)", eli.Heading, li.Heading)
+			case eli.Mv != li.Mv:
+				s = fmt.Sprintf("Mv (%f != %f)", eli.Mv, li.Mv)
+			case int(eli.Satinfo.Inuse) != inuse:
+				s = fmt.Sprintf("Inuse (%d != %d)", eli.Satinfo.Inuse, inuse)
+			case int(eli.Satinfo.Inview) != len(li.Sats):
+				s = fmt.Sprintf("Inview (%d != %d)", eli.Satinfo.Inview, len(li.Sats))
+			}
+			if s != "" {
+				panic(fmt.Sprintf("PACKED STRUCTURE DOES'NT MATCH (%s)\n%s\n", s, hex.Dump(pli)))
 			}
 			fmt.Printf("Packed structure (%d bytes) is OK\n\n", len(pli))
 		case <-done: // exit the handler
+fmt.Println("done!")
 			return
 		}
 	}
@@ -186,11 +222,13 @@ fmt.Printf("\nperiod = %d, first = %s, last = %s\n", period, ss[0], lsdt)
 // -------------------------------------------------------------------------
 // The main function.
 func main() {
-	var olsdt string
-	var operiod int
+	var olsdt, lsdt string
+	var operiod, period int
+	var ominDel, minDel int
 	
 	// Retrieve command-line flags.
-	flag.IntVar(&operiod, "period", 0, "specify the NMEA cycle period, in milliseconds")
+	flag.IntVar(&ominDel, "minDel", -1, "specify the minimum delay between 2 NMEA cycles, in milliseconds")
+	flag.IntVar(&operiod, "period", -1, "specify the NMEA cycle period, in milliseconds")
 	flag.StringVar(&olsdt, "lsdt", "", "give the data type of the last sequence in the cycle (e.g. 'GPRMC')")
 	flag.Parse()
 
@@ -209,25 +247,32 @@ func main() {
 	// Get a Scanner in order to read the file on a line-per-line basis.
 	scanner := bufio.NewScanner(file)
 	
-	// Try to determine the characteristics of the NMEA sentences cycle.
-	period, lsdt := getCycle(scanner)
-	if operiod != 0 {
-		period = operiod	// prefer user-given period
+	// If necessary, try to determine the characteristics of the NMEA sentences cycle.
+	if olsdt == "" {
+		period, lsdt = getCycle(scanner)
+		if lsdt == "" {	// failed to determine LSDT
+			return
+		}
+	} else {
+		lsdt = olsdt		// prefer user-given LSDT
+		period = 1000		// default to a 1 second period
 	}
-	if olsdt != "" {
-		lsdt = olsdt			// prefer user-given LSDT
+	if operiod >= 0 {
+		period = operiod	// prefer user-given period (0 is OK)
 	}
-	if period == 0 || lsdt == "" {
-		return
+	
+	if ominDel >= 0 {
+		minDel = ominDel	// prefer user-given minimum delay (0 is OK)
+//	} else {
+//		minDel = 0		// no minDel specified: loc will do the job
 	}
-fmt.Printf("period = %d, lsdt = %s\n", period, lsdt)
+fmt.Printf("lsdt = %s, minDel = %d, period = %d\n", lsdt, minDel, period)
 
 	// Start a go routine to handle fixes from the loc package.
 	// The channel used to retrieve fixes is returned by loc.Init.
 	done := make(chan struct {})
 	defer close(done)
-	work := loc.Init(lsdt, 0)
-//	work := loc.Init("", 0)		// let loc package determine lsdt
+	work := loc.Init(lsdt, uint(minDel))
 	defer loc.Exit()
 	go locHandler(work, done)
 

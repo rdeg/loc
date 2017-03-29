@@ -1,14 +1,11 @@
 package loc
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"time"
-//	"unsafe"
 )
 
 const (
@@ -42,13 +39,12 @@ const (
 	GLGSV = 0x0020 // like GPGSV but for Glonass satellites
 	GAGSV = 0x0040 // like GPGSV but for Galileo satellites
 
-	LOC_MAXSAT = 32 // maximum satellites in satinfo
-
 	GSA_MAXSAT = 12 // max sats in a GSA message
 )
 
 // Time structure.
-// We actually use a Windows SYSTEMTIME equivalent.
+// The LocTime structure is an equivalent of the Windows SYSTEMTIME structure,
+// described in the MSDN (https://msdn.microsoft.com/fr-fr/library/windows/desktop/ms724950(v=vs.85).aspx).
 type LocTime struct {
 	Year   uint16
 	Month  uint16
@@ -88,39 +84,6 @@ type LocInfo struct {
 	Sats    []LocSat // Satellites information
 }
 
-// EBSF LocSat equivalent
-type EBSFLocSat struct {
-	Id      uint16 // Satellite ID
-	Elv     uint8  // Elevation in degrees, 90 maximum
-	Res     uint8  // reserved for alignment
-	Azimuth uint16 // Azimuth, degrees from true north, 000 to 359
-	Sig     uint8  // Signal, 00-99 dB
-	Inuse   uint8  // Used in position fix
-}
-
-// EBSF LocInfo equivalent (returned by Pack in a []byte)
-type EBSFLocInfo struct {
-	Level   uint8    // Level of information available
-	Quality uint8    // GPS quality indicator (0 = Invalid; 1 = Fix; 2 = Differential, 3 = Sensitive)
-	NavMode uint8    // Operating mode, used for navigation (1 = Fix not available; 2 = 2D; 3 = 3D)
-	Smask   uint8    // NMEA sentences processed for this fix
-	Utc     LocTime  // UTC of position
-	Pdop    float32  // Position Dilution Of Precision
-	Hdop    float32  // Horizontal Dilution Of Precision
-	Vdop    float32  // Vertical Dilution Of Precision
-	Lat     float32  // Latitude
-	Lon     float32  // Longitude
-	Elv     float32  // Antenna altitude above/below mean sea level (geoid) in meters
-	Speed   float32  // Speed over the ground in kilometers/hour
-	Heading float32  // Track angle in degrees True
-	Mv      float32  // Magnetic variation degrees (Easterly var. subtracts from true course)
-	Satinfo struct { // Satellites information
-		Inuse  uint16              // Number of satellites in use (not those in view)
-		Inview uint16              // Total number of satellites in view
-		Sat [LOC_MAXSAT]EBSFLocSat // Per-satellite information
-	}
-}
-
 // Sentence processing function and minimal validation.
 type fmtS struct {
 	fn	func([]string)	// processing function
@@ -129,13 +92,11 @@ type fmtS struct {
 
 var (
 	// locChan is used to return GNSS fixes to the user. After every cycle of
-	// NMEA sentences, a LocInfo is built in lastLoc and delivered on this channel.
+	// NMEA messages, a LocInfo is delivered on this channel.
 	locChan chan *LocInfo
 
 	// curLoc is the structure where data is progressivly built.
-	// lastLoc is copied from curLoc at the end of each NMEA cycle and finally
-	// delivered to the user on the locChan channel.
-	curLoc, lastLoc LocInfo
+	curLoc	LocInfo
 
 	iuBM     [256 / 8]uint8 // bitmap of in use satellites (IDs 0..256, 0 unused)
 	lastGSV  bool           // true when the last GSV message of a burst has been read
@@ -181,7 +142,7 @@ func nInUse(loc *LocInfo) (n uint16) {
 }
 */
 
-// Return an updated copy of curLoc and reset curLoc for the next fix.
+// Return a copy of curLoc and reset curLoc for the next fix.
 func getLoc() *LocInfo {
 	// Compute the 'level'
 	curLoc.Level = LOC_HAVE_NOTHING // assume we have nothing serious
@@ -208,7 +169,7 @@ func getLoc() *LocInfo {
 	}
 
 	// Here is the fix!
-	lastLoc = curLoc // full copy
+	lastLoc := curLoc // *allocate* and copy everything
 
 	// Prepare data structures for the next fix.
 	//	curLoc = LocInfo{}	// clear the working LocInfo
@@ -248,6 +209,7 @@ func getLoc() *LocInfo {
 	iuBM = [256 / 8]uint8{}
 
 //fmt.Println("FIX")
+	// Return a reference to the allocated LocInfo.
 	return &lastLoc
 }
 
@@ -471,119 +433,6 @@ func doGSV(fields []string) {
 	}
 
 	curLoc.Smask |= GxGSV
-}
-
-/*
-Pack packs a LocInfo structure into an EBSF LOCINFO, suited for the wire.
-
-The SYSTEMTIME structure is a standard Windows data type described in the MSDN
-(https://msdn.microsoft.com/fr-fr/library/windows/desktop/ms724950(v=vs.85).aspx).
-
-In C notation, the EBSF LOCSATELLITE and LOCINFO structures have the
-following binary layout:
-
-	// Information about a satellite.
-	typedef struct {
-	    unsigned short id;       // Satellite ID
-	    unsigned char  elv;      // Elevation in degrees, 90 maximum
-	    unsigned char  reserved; // alignment
-	    unsigned short azimuth;  // Azimuth, degrees from true north, 000 to 359
-	    unsigned char  sig;      // Signal, 00-99 dB
-	    unsigned char  in_use;   // Used in position fix
-	} LOCSAT;                    // 8 bytes
-
-	// Location information.
-	typedef struct {
-	    unsigned char  bLevel;   // 00: level of information available
-	    unsigned char  bQuality; // 01: GPS quality indicator (0 = Invalid; 1 = Fix; 2 = Differential, 3 = Sensitive)
-	    unsigned char  bNavMode; // 02: Operating mode, used for navigation (1 = Fix not available; 2 = 2D; 3 = 3D)
-	    unsigned char  bRes;     // 03: reserved
-	    SYSTEMTIME     utc;      // 04: UTC of position
-	    float          PDOP;     // 20: Position Dilution Of Precision
-	    float          HDOP;     // 24: Horizontal Dilution Of Precision
-	    float          VDOP;     // 28: Vertical Dilution Of Precision
-	    float          lat;      // 32: Latitude
-	    float          lon;      // 36: Longitude
-	    float          elv;      // 40: Antenna altitude above/below mean sea level (geoid) in meters
-	    float          speed     // 44: Speed over the ground in kilometers/hour
-	    float          heading;  // 48: Track angle in degrees True
-	    float          mv;       // 52: Magnetic variation degrees (Easterly var. subtracts from true course)
-	    struct {                 // 56: Information about all visible satellites.
-	     unsigned short inuse;   // 56: Number of satellites in use (not those in view)
-	     unsigned short inview;  // 58: Total number of satellites in view
-	     LOCSAT sat[LOC_MAXSAT]; // 60:Satellites information
-	    }              satinfo;  // 260 bytes (2 + 2 + 32 * 8)
-	} LOCINFO;                   // 316 bytes (56 + 260)
-
-The result is returned in a slice of exactly 316 bytes.
-
-Please note that the number of satellites that the satinfo field of a LOCINFO
-can hold is limited to 32 (LOC_MAXSAT). This is not critical when a pure GPS
-receptor is used but it is theoretically possible that more satellites
-can be seen when a GNSS receptor able to handle multiple constellations is
-used. To address this possibility, Pack copies the in-use satellites first,
-then the other satellites, within the limit of 32. 
-*/
-func Pack(loc *LocInfo) []byte {
-	var buf bytes.Buffer
-	var eloc EBSFLocInfo
-
-	eloc.Level = loc.Level
-	eloc.Quality = loc.Quality
-	eloc.NavMode = loc.NavMode
-	eloc.Smask = loc.Smask
-	eloc.Utc = loc.Utc
-	eloc.Pdop = loc.Pdop
-	eloc.Hdop = loc.Hdop
-	eloc.Vdop = loc.Vdop
-	eloc.Lat = loc.Lat
-	eloc.Lon = loc.Lon
-	eloc.Elv = loc.Elv
-	eloc.Speed = loc.Speed
-	eloc.Heading = loc.Heading
-	eloc.Mv = loc.Mv
-
-	copySat := func(esat *EBSFLocSat, sat *LocSat) {
-		esat.Id = uint16(sat.Id)
-		esat.Elv = sat.Elv
-		//		esat.Res		= 0
-		esat.Azimuth = sat.Azimuth
-		esat.Sig = sat.Sig
-		if sat.Inuse {
-			esat.Inuse = 1
-		} else {
-			esat.Inuse = 0
-		}
-	}
-
-	// Copy in-use satellites first, then copy the other satellites.
-	// We cannot copy the info of more than LOC_MAXSAT satellites.
-	eloc.Satinfo.Inview = 0
-	for i := range loc.Sats {
-		if loc.Sats[i].Inuse {
-			copySat(&eloc.Satinfo.Sat[eloc.Satinfo.Inview], &loc.Sats[i])
-			eloc.Satinfo.Inuse++
-			eloc.Satinfo.Inview++
-			if eloc.Satinfo.Inview == LOC_MAXSAT {
-				goto copydone
-			}
-		}
-	}
-	for i := range loc.Sats {
-		if !loc.Sats[i].Inuse {
-			copySat(&eloc.Satinfo.Sat[eloc.Satinfo.Inview], &loc.Sats[i])
-			eloc.Satinfo.Inview++
-			if eloc.Satinfo.Inview == LOC_MAXSAT {
-				goto copydone
-			}
-		}
-	}
-copydone:
-
-	binary.Write(&buf, binary.LittleEndian, eloc)
-//fmt.Println("sizeof(eloc) =", unsafe.Sizeof(eloc), "len(buf.Bytes()) =", len(buf.Bytes()))
-//fmt.Println("outbuf =", buf.Bytes())
-	return buf.Bytes()
 }
 
 // Check if the given (spliced) sentence is the last one in the NMEA cycle.
