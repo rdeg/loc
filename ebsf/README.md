@@ -11,36 +11,41 @@ See https://godoc.org/github.com/rdeg/loc and https://godoc.org/github.com/rdeg/
 A typical usage would look like the following code:
 
 	import (
-		"log"
 		"unsafe"
 		
 		"github.com/rdeg/loc"
 		"github.com/rdeg/loc/ebsf"
 	)
+	.
+	.
+	.
 	
+	// This goroutine handles the LocInfo sent by the loc package.
+	func locHandler(work chan *loc.LocInfo, done chan struct{}) {
+		for {
+			select {
+			case li := <-work:
+				// Pack the loc.LocInfo we just received.
+				pli := ebsf.Pack(li)
+
+				// loc.Pack returns a slice of bytes whose payload should
+				// exactly match an EBSFLocInfo structure.
+				eli := (*ebsf.EBSFLocInfo)(unsafe.Pointer(&pli[0]))
+
+				// Do something clever with the EBSFLocInfo.
+				.
+				.
+				.
+
+			case <-done:
+				return
+			}
+		}
+	}
 	.
 	.
 	.
 
-	// This typically happens in the locHandler Goroutine.
-	select {
-	case li := <-work:
-		// Pack the loc.LocInfo we just received.
-		pli := ebsf.Pack(li)
-		
-		// loc.Pack returns a slice of bytes whose payload should
-		// exactly match an EBSFLocInfo structure.
-		eli := (*ebsf.EBSFLocInfo)(unsafe.Pointer(&pli[0]))
-		
-		// Roughly check the packed version of the LocInfo.
-		if eli.Utc != li.Utc || eli.Lat != li.Lat || eli.Lon != li.Lon ||
-				int(eli.Satinfo.Inview) != len(li.Sats) {
-			panic("PACKED STRUCTURE DOES'NT MATCH UNPACKED ONE!\n")
-		}
-		log.Printf("Packed structure (%d bytes) is OK\n\n", len(pli))
-	case <-done:
-		return
-	}
 
 ## Credits
 
