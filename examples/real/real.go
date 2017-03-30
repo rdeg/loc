@@ -19,6 +19,9 @@ func main() {
 	go locHandler(work, done)
 	
 	// Open the GNSS device.
+	// Please note that some serial line tuning may be needed before
+	// operating the port, such as suppressing the echo and the conversion
+	// of CR into LF (i.e. 'stty -F /dev/ttyACM0 -echo -icrlf').
 	file, err := os.Open("/dev/ttyACM0")
 	if err != nil {
 		log.Fatal(err)
